@@ -20,6 +20,7 @@ fn nice_enum_impl(input: DeriveInput) -> TokenStream {
         ident: syn::Ident,
         qualified: TokenStream,
         as_method: Option<TokenStream>,
+        as_mut_method: Option<TokenStream>,
         into_method: Option<TokenStream>,
         is_variant_method: syn::Ident,
         source_arm: TokenStream,
@@ -41,8 +42,8 @@ fn nice_enum_impl(input: DeriveInput) -> TokenStream {
 
             let source_ident = quote! { Self::#ident };
 
-            let (source_arm, as_method, into_method) = match &variant.fields {
-                Fields::Named(_) => (quote! { #source_ident { .. } }, None, None),
+            let (source_arm, as_method, as_mut_method, into_method) = match &variant.fields {
+                Fields::Named(_) => (quote! { #source_ident { .. } }, None, None, None),
                 Fields::Unnamed(fields) => {
                     if fields.unnamed.len() == 1 {
                         // SAFETY: We know that there is exactly one field in the variant.
@@ -54,6 +55,18 @@ fn nice_enum_impl(input: DeriveInput) -> TokenStream {
 
                         let as_method = quote! {
                             #vis fn #as_method(&self) -> Option<&#inner_ty> {
+                                match self {
+                                    #source_ident(v) => Some(v),
+                                    _ => None,
+                                }
+                            }
+                        };
+
+                        let as_mut_method = format!("as_{}_mut", &ident_snake_case);
+                        let as_mut_method = Ident::new(&as_mut_method, Span::call_site());
+
+                        let as_mut_method = quote! {
+                            #vis fn #as_mut_method(&mut self) -> Option<&mut #inner_ty> {
                                 match self {
                                     #source_ident(v) => Some(v),
                                     _ => None,
@@ -76,19 +89,21 @@ fn nice_enum_impl(input: DeriveInput) -> TokenStream {
                         (
                             quote! { #source_ident(_) },
                             Some(as_method),
+                            Some(as_mut_method),
                             Some(into_method),
                         )
                     } else {
-                        (quote! { #source_ident(_) }, None, None)
+                        (quote! { #source_ident(_) }, None, None, None)
                     }
                 }
-                Fields::Unit => (quote! { #source_ident }, None, None),
+                Fields::Unit => (quote! { #source_ident }, None, None, None),
             };
 
             Variant {
                 ident,
                 qualified,
                 as_method,
+                as_mut_method,
                 into_method,
                 is_variant_method,
                 source_arm,
@@ -147,6 +162,12 @@ fn nice_enum_impl(input: DeriveInput) -> TokenStream {
         .filter_map(|variant| variant.as_method.clone())
         .collect();
 
+    let source_as_mut_variant_fn: TokenStream = variants
+        .iter()
+        .filter_map(|variant| variant.as_mut_method.clone())
+        .collect();
+
+
     let source_into_variant_fn: TokenStream = variants
         .iter()
         .filter_map(|variant| variant.into_method.clone())
@@ -161,6 +182,8 @@ fn nice_enum_impl(input: DeriveInput) -> TokenStream {
             #source_is_variant_fn
 
             #source_as_variant_fn
+
+            #source_as_mut_variant_fn
 
             #source_into_variant_fn
         }
@@ -222,6 +245,13 @@ mod tests {
                 }
 
                 pub fn as_unnamed_fields(&self) -> Option<&u32> {
+                    match self {
+                        Self::UnnamedFields(v) => Some(v),
+                        _ => None,
+                    }
+                }
+
+                pub fn as_unnamed_fields_mut(&mut self) -> Option<&mut u32> {
                     match self {
                         Self::UnnamedFields(v) => Some(v),
                         _ => None,
